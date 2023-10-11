@@ -136,6 +136,7 @@ void loop()
   
     /* Verifica se chegou alguma informação do tamanho esperado */
     packet_size = LoRa.parsePacket();
+    Serial.println(packet_size);
     
     if (packet_size == sizeof(TDadosLora)) 
     {
@@ -170,4 +171,5 @@ void loop()
 
         display.display();      
     }
+    delay(3000);
 }
