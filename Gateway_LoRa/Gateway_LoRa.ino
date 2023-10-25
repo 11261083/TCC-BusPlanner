@@ -67,13 +67,14 @@ PubSubClient MQTT(espClient); // Instancia o Cliente MQTT passando o objeto espC
 /* definicoes de estrutura de tipos */
 enum PacketTypes {
     TIMESTAMP_PACKET = 1,
-    TEMPERATURE_PACKET = 2
+    BUSARRIVALDATA_PACKET = 2,
+    BUSARRIVALDATA_TO_GATEWAY = 3,
     // Adicione mais tipos conforme necessário
 };
 
 typedef struct __attribute__((__packed__))
 {
-  uint32_t uid;
+  uint32_t lineId;
   uint8_t packetType;
 }LoRaPacketHeader;
 
@@ -81,6 +82,24 @@ struct TimestampPacket : public LoRaPacketHeader
 {
   uint32_t timestamp;
 } ;
+
+struct BusArrivalDataPacket : public LoRaPacketHeader
+{
+  uint32_t stopId;
+  uint32_t busId;
+  uint32_t time;
+};
+
+#define MAX_HISTORY  8   //
+struct BusInfo 
+{
+  uint32_t busId;
+  uint32_t lineId;
+  uint32_t time;
+  bool infoType; // estimativa: false, tempo de chegada: true;
+};
+BusInfo busHistory[MAX_HISTORY];
+int currentHistoryIndex = 0;
 
 
 
@@ -161,7 +180,7 @@ void envia_configTimestamp_LoRa(uint32_t timestamp)
 {
   TimestampPacket timestampPacket;
 
-  timestampPacket.uid = 101;
+  timestampPacket.lineId = 8032;
   timestampPacket.packetType = TIMESTAMP_PACKET;
   timestampPacket.timestamp = timestamp;
 
@@ -169,7 +188,7 @@ void envia_configTimestamp_LoRa(uint32_t timestamp)
   LoRa.write((unsigned char *)&timestampPacket, sizeof(TimestampPacket));
   Serial.println("Sending Timestamp Configuration");
   Serial.println(sizeof(TimestampPacket));
-  Serial.println(timestampPacket.uid);
+  Serial.println(timestampPacket.lineId);
   Serial.println(timestampPacket.timestamp);
   LoRa.endPacket();
   if (LoRa.endPacket() == 1) {
@@ -180,10 +199,50 @@ void envia_configTimestamp_LoRa(uint32_t timestamp)
   }
 }
 
+void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
+{
+  Serial.println("Bus ID: " + String(arrivalData.busId));
+  Serial.println("Line ID: " + String(arrivalData.lineId));
+  Serial.println("Stop ID: " + String(arrivalData.stopId));
+
+  uint32_t unixTime = arrivalData.time;
+  struct tm timeStruct;
+  gmtime_r((const time_t *)&unixTime, &timeStruct);
+
+  int currentHour = timeStruct.tm_hour - 3;
+  if(currentHour < 0)
+  {
+    currentHour = currentHour + 24;
+  }
+
+  Serial.println("Arrival Time: " + String(currentHour) + " : " + String(timeStruct.tm_min) + " : " + String(timeStruct.tm_sec));
+
+  String date = (String((timeStruct.tm_year) + 1900) + "-" + String(( timeStruct.tm_mon) + 1) + "-" + String(timeStruct.tm_mday));
+  String hour = (String(currentHour) + ":" + String(timeStruct.tm_min) + ":" + String(timeStruct.tm_sec));
+  const char* timeChar = ("Date: " + date + " - Time: " + hour).c_str();
+
+  MQTT.publish("TccTagoIO/busTest", timeChar);
+
+  BroadcastArrivalData(arrivalData);
+
+}
+
+void BroadcastArrivalData(BusArrivalDataPacket arrivalData)
+{
+  arrivalData.packetType = BUSARRIVALDATA_PACKET;
+
+  LoRa.beginPacket();
+  LoRa.write((unsigned char *)&arrivalData, sizeof(BusArrivalDataPacket));
+  Serial.println("Sending Timestamp Configuration");
+  Serial.println(arrivalData.lineId);
+  Serial.println(arrivalData.stopId);
+  LoRa.endPacket();
+}
 
 void setup() {
   Serial.begin(115200);
   initWiFi();
+  MQTT_init();
   while(LoRa_init() == false);
   configTime(3600 * timezone, 0, "time.nist.gov", "0.pool.ntp.org", "1.pool.ntp.org");
 
@@ -207,21 +266,40 @@ void setup() {
   }
 }
 
+/* variaveis utilizados para simular onibus chegando, realiza o trabalho de um contador assincrono que permite nao utilizar delay no loop principal */
+unsigned long previousMillis = 0;
+const long interval = 30000; // 30s
 
-void loop() {
+void loop()
+ {
+  // if statement principal para a leitura do pacote
+  int packetSize = 0;
+  packetSize = LoRa.parsePacket();
+  if(packetSize) 
+  {
+    // Primeiro, lemos o cabeçalho para identificar o tipo de pacote
+    LoRaPacketHeader header;
+    LoRa.readBytes((uint8_t*)&header, sizeof(LoRaPacketHeader));
+    Serial.println(header.lineId);
 
-  struct tm tmstruct ;
-  tmstruct.tm_year = 0;
-  getLocalTime(&tmstruct);
+    if(header.lineId != 0)
+    {
+      // Com base no tipo, decidimos como ler o restante
+      switch(header.packetType)
+      {
+        // colocar mais case statement conforme o necessario
+        case BUSARRIVALDATA_TO_GATEWAY:
+          BusArrivalDataPacket arrivalData;
+          memcpy(&arrivalData, &header, sizeof(LoRaPacketHeader));
+          LoRa.readBytes(((uint8_t*)&arrivalData) + sizeof(LoRaPacketHeader), sizeof(BusArrivalDataPacket) - sizeof(LoRaPacketHeader));
+          processBusArrivalPacketData(arrivalData);
+          break;
+          
 
-  String date = (String((tmstruct.tm_year) + 1900) + "-" + String(( tmstruct.tm_mon) + 1) + "-" + String(tmstruct.tm_mday));
-  String hour = (String(tmstruct.tm_hour) + ":" + String(tmstruct.tm_min) + ":" + String(tmstruct.tm_sec));
-
-  const char* hourChar = hour.c_str();
-
-  Serial.println("Date: " + date + " - Time: " + hour);
-
-  delay(3000);
-  MQTT.publish("TccTagoIO/teste", hourChar);
-
+        default:
+          Serial.println("Tipo de pacote desconhecido recebido.");
+          break;
+      }
+    }
+  }
 }

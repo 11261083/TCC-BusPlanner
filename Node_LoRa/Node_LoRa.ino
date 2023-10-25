@@ -5,6 +5,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <time.h>
+#include <TimeLib.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
 
 
 /* Endereço I2C do display */
@@ -32,9 +37,17 @@
 #define HIGH_GAIN_LORA     20  /* dBm */
 #define BAND               915E6  /* 915MHz de frequencia */
 
+/* Configuracao do BLE */
+int scanTime = 1; //Em Segundos
+int nivelRSSI = -60; //Ajustar conforme o ambiente
+String dispositivosAutorizados = "4f:0d:4e:f7:d6:43"; //MAC do seu dispositivo BLE
+bool dispositivoPresente = false;
+
 
 /* Definicaco do Unique ID do dispositivo */
-#define My_UID            101
+#define StopID              101
+#define LineID_A            8012
+#define LineID_B            8032
 
 /* objeto do display */
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, 16);
@@ -52,13 +65,14 @@ bool timestampConfigured = false;
 
 enum PacketTypes {
     TIMESTAMP_PACKET = 1,
-    BUSARRIVALDATA_PACKET = 2
+    BUSARRIVALDATA_PACKET = 2,
+    BUSARRIVALDATA_TO_GATEWAY = 3,
     // Adicione mais tipos conforme necessário
 };
 
 typedef struct __attribute__((__packed__))
 {
-  uint32_t uid;
+  uint32_t lineId;
   uint8_t packetType;
 }LoRaPacketHeader;
 
@@ -66,6 +80,24 @@ struct TimestampPacket : public LoRaPacketHeader
 {
   uint32_t timestamp;
 } ;
+
+struct BusArrivalDataPacket : public LoRaPacketHeader
+{
+  uint32_t stopId;
+  uint32_t busId;
+  uint32_t time;
+};
+
+#define MAX_HISTORY  8   //
+struct BusInfo 
+{
+  uint32_t busId;
+  uint32_t lineId;
+  uint32_t time;
+  bool infoType; // estimativa: false, tempo de chegada: true;
+};
+BusInfo busHistory[MAX_HISTORY];
+int currentHistoryIndex = 0;
 
 
 // Initialize LoRa connection
@@ -84,10 +116,10 @@ bool LoRa_init(void)
     }
     else
     {
-        /* Configura o ganho do receptor LoRa para 20dBm, o maior ganho possível (visando maior alcance possível) */ 
-        LoRa.setTxPower(HIGH_GAIN_LORA); 
-        Serial.println("[LoRa Node] Comunicacao com o radio LoRa ok");
-        status_init = true;
+      /* Configura o ganho do receptor LoRa para 20dBm, o maior ganho possível (visando maior alcance possível) */ 
+      LoRa.setTxPower(HIGH_GAIN_LORA); 
+      Serial.println("[LoRa Node] Comunicacao com o radio LoRa ok");
+      status_init = true;
     }
 
     return status_init;
@@ -98,36 +130,37 @@ void display_init()
 {
     if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) 
     {
-        Serial.println("[LoRa Node] Falha ao inicializar comunicacao com OLED");        
+      Serial.println("[LoRa Node] Falha ao inicializar comunicacao com OLED");        
     }
     else
     {
-        Serial.println("[LoRa Node] Comunicacao com OLED inicializada com sucesso");
+      Serial.println("[LoRa Node] Comunicacao com OLED inicializada com sucesso");
     
-        /* Limpa display e configura tamanho de fonte */
-        display.clearDisplay();
-        display.setTextSize(1);
-        display.setTextColor(WHITE);
+      /* Limpa display e configura tamanho de fonte */
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(WHITE);
     }
 }
 
-void setRTCWithUnixTimestamp(time_t unixTimestamp) {
-    struct tm timeinfo;
-    gmtime_r(&unixTimestamp, &timeinfo); // Converte o timestamp para tm struct
-    timeinfo.tm_isdst = 0; // Define o horário de verão como desconhecido
+void setRTCWithUnixTimestamp(time_t unixTimestamp) 
+{
+  struct tm timeinfo;
+  gmtime_r(&unixTimestamp, &timeinfo); // Converte o timestamp para tm struct
+  timeinfo.tm_isdst = 0; // Define o horário de verão como desconhecido
 
-    // Configura o RTC com a estrutura tm
-    timeval tv;
-    tv.tv_sec = unixTimestamp;  // definindo os segundos
-    tv.tv_usec = 0;             // e os microsegundos
+  // Configura o RTC com a estrutura tm
+  timeval tv;
+  tv.tv_sec = unixTimestamp;  // definindo os segundos
+  tv.tv_usec = 0;             // e os microsegundos
 
-    timezone tz;
-    tz.tz_minuteswest = 180;  // 3 horas = 180 minutos
-    tz.tz_dsttime = 0;
+  timezone tz;
+  tz.tz_minuteswest = 180;  // 3 horas = 180 minutos
+  tz.tz_dsttime = 0;
 
-    settimeofday(&tv, &tz);
+  settimeofday(&tv, &tz);
 
-    timestampConfigured = true;
+  timestampConfigured = true;
 }
 
 void processTimestamp(TimestampPacket timestampData)
@@ -162,6 +195,124 @@ void PrintTime()  // funcao de teste, TODO: deletar depois
   Serial.println();
 }
 
+void PrintBusHistory()
+{
+  int temp = currentHistoryIndex - 1;
+  if(temp == -1)
+  {
+    temp = 7;
+  }
+  for(int i = 0; i < MAX_HISTORY; i++)
+  {
+    if(busHistory[temp].busId == 0)
+    {
+      temp--;
+      if(temp == -1)
+      {
+        temp = 7;
+      }
+
+      continue;
+    }
+    Serial.println("Bus ID: " + String(busHistory[temp].busId));
+    Serial.println("Line ID: " + String(busHistory[temp].lineId));
+
+    uint32_t unixTime = busHistory[temp].time;
+    struct tm timeStruct;
+    gmtime_r((const time_t *)&unixTime, &timeStruct);
+    
+    int currentHour = timeStruct.tm_hour - 3;
+    if(currentHour < 0)
+    {
+      currentHour = currentHour + 24;
+    }
+
+    if(busHistory[temp].infoType)
+    {
+      Serial.println("Arrival Time: " + String(currentHour) + " : " + String(timeStruct.tm_min) + " : " + String(timeStruct.tm_sec));
+    }
+    else
+    {
+      Serial.println("Arrival Time: " + String(currentHour - 3) + " : " + String(timeStruct.tm_min) + " : " + String(timeStruct.tm_sec + 10));
+    }
+
+    temp--;
+    if(temp == -1)
+    {
+      temp = 7;
+    }
+  }
+}
+
+void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
+{
+  if(arrivalData.stopId < StopID)     // OBS: as paradas de onibus numa linha terao seu StopId numa sequencia, logo os dados dos pontos da frente que nao seriam interessantes serao descartados
+  {
+    UpdateBusHistory(arrivalData, false);
+  }
+}
+
+void UpdateBusHistory(BusArrivalDataPacket arrivalData, bool isArrival)  //TODO: pensar no caso de dados de onibus que AINDA ESTAO na memoria
+{
+  BusInfo newInfo;
+  newInfo.infoType = isArrival;
+  newInfo.busId = arrivalData.busId;
+  newInfo.lineId = arrivalData.lineId;
+  newInfo.time = arrivalData.time;
+
+  busHistory[currentHistoryIndex] = newInfo;
+  currentHistoryIndex = (currentHistoryIndex + 1) % MAX_HISTORY;
+
+  PrintBusHistory();
+}
+
+void SendBusArrivalData(uint32_t busId)
+{
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) 
+    {
+      Serial.println("Falha ao obter o tempo local");
+      return;
+    }
+
+    time_t unix_timestamp = mktime(&timeinfo);
+
+    BusArrivalDataPacket arrivalData;
+    arrivalData.packetType = BUSARRIVALDATA_TO_GATEWAY;
+    arrivalData.lineId = LineID_B;
+    arrivalData.busId = busId;
+    arrivalData.stopId = StopID;
+    arrivalData.time = static_cast<uint32_t>(unix_timestamp);
+
+    UpdateBusHistory(arrivalData, true);
+
+    LoRa.beginPacket();
+    LoRa.write((unsigned char *)&arrivalData, sizeof(BusArrivalDataPacket));
+    Serial.println(arrivalData.lineId);
+    Serial.println(arrivalData.time);
+    LoRa.endPacket();
+}
+
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
+    void onResult(BLEAdvertisedDevice advertisedDevice) {
+      String dispositivosEncontrados = advertisedDevice.getAddress().toString().c_str();
+      Serial.println(dispositivosEncontrados);
+      if (dispositivosEncontrados == dispositivosAutorizados  
+                    /*&& advertisedDevice.getRSSI() > nivelRSSI*/) {
+        dispositivoPresente = true;
+        Serial.println(dispositivoPresente);
+      } else {
+
+      }
+    }
+};
+
+void scanBLE() {
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(false);
+  BLEScanResults foundDevices = pBLEScan->start(scanTime, false);
+}
 
 void setup() 
 {
@@ -175,9 +326,16 @@ void setup()
   display.print("Aguarde...");
   display.display();
 
+  BLEDevice::init("BLE_Node");
+
   // tenta ate obter sucesso
   while(LoRa_init() == false);
 }
+
+/* variaveis utilizados para simular onibus chegando, realiza o trabalho de um contador assincrono que permite nao utilizar delay no loop principal */
+unsigned long previousMillis = 0;
+const long interval = 2000; // 2s
+int busId = 1;
 
 void loop() 
 {
@@ -191,9 +349,9 @@ void loop()
     // Primeiro, lemos o cabeçalho para identificar o tipo de pacote
     LoRaPacketHeader header;
     LoRa.readBytes((uint8_t*)&header, sizeof(LoRaPacketHeader));
-    Serial.println(header.uid);
+    Serial.println(header.lineId);
 
-    if(header.uid == My_UID)
+    if(header.lineId == LineID_A || header.lineId == LineID_B)
     {
       // Com base no tipo, decidimos como ler o restante
       switch(header.packetType)
@@ -210,7 +368,12 @@ void loop()
           break;
         
         // colocar mais case statement conforme o necessario
-          case BUSARRIVALDATA_PACKET:
+        case BUSARRIVALDATA_PACKET:
+          BusArrivalDataPacket arrivalData;
+          memcpy(&arrivalData, &header, sizeof(LoRaPacketHeader));
+          LoRa.readBytes(((uint8_t*)&arrivalData) + sizeof(LoRaPacketHeader), sizeof(BusArrivalDataPacket) - sizeof(LoRaPacketHeader));
+          processBusArrivalPacketData(arrivalData);
+          break;
           
 
         default:
@@ -220,9 +383,24 @@ void loop()
     }
   }
 
-  if(timestampConfigured)
+  unsigned long currentMillis = millis();
+  if(currentMillis - previousMillis >= interval)
   {
-    PrintTime(); // funcao de teste, TODO: deletar depois
-    delay(3000);
+    previousMillis = currentMillis;
+    scanBLE();
+    if(dispositivoPresente && timestampConfigured)
+    {
+      Serial.println("Onibus chegou!");
+      SendBusArrivalData(32); // TODO: atribuir bus ID dependendo do MAC do beacon
+      dispositivoPresente = false;
+      delay(30000);
+    }
   }
+
+  // if(timestampConfigured)
+  // {
+  //   PrintTime(); // funcao de teste, TODO: deletar depois
+  //   delay(3000);
+  //   timestampConfigured = false;
+  // }
 }
