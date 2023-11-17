@@ -38,10 +38,10 @@
 #define BAND               915E6  /* 915MHz de frequencia */
 
 /* Configuracao do BLE */
-int scanTime = 1; //Em Segundos
+int scanTime = 0.1; //Em Segundos
 int nivelRSSI = -60; //Ajustar conforme o ambiente
-String dispositivosAutorizados = "4f:0d:4e:f7:d6:43"; //MAC do seu dispositivo BLE
-bool dispositivoPresente = false;
+String dispositivosAutorizados = "ff:ff:c1:0e:1e:60"; //MAC do seu dispositivo BLE
+String dispositivoPresente = "0";
 
 
 /* Definicaco do Unique ID do dispositivo */
@@ -54,20 +54,22 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, 16);
 
 bool timestampConfigured = false;
 
-/* typedefs */
-// typedef struct __attribute__((__packed__))   nao sabemos se vamos usar assim ainda
-// {
-//   uint32_t uid;            // Unique Identifier of the intended recipient node
-//   uint8_t packetType;      // Type of packet, e.g., 0x01 for timestamp config
-//   uint32_t unixTimestamp;  // Unix Timestamp from the Gateway
-//   uint16_t checksum;       // Simple checksum or CRC for error-checking
-// }TimeStampConfigPacket;
 
 enum PacketTypes {
     TIMESTAMP_PACKET = 1,
     BUSARRIVALDATA_PACKET = 2,
     BUSARRIVALDATA_TO_GATEWAY = 3,
     // Adicione mais tipos conforme necessário
+};
+
+struct MacToId {
+    const char* mac;
+    int id;
+};
+
+MacToId macMappings[] = {
+    {"ff:ff:c1:0e:1e:60", 32},
+    // Adicione mais mapeamentos conforme necessário
 };
 
 typedef struct __attribute__((__packed__))
@@ -99,6 +101,36 @@ struct BusInfo
 BusInfo busHistory[MAX_HISTORY];
 int currentHistoryIndex = 0;
 
+int indexOfBusInfo(uint32_t busId)
+ {
+  for(int i = 0; i < MAX_HISTORY; i++)
+  {
+    if (busHistory[i].busId == busId)
+      return i;
+  }
+  return -1;
+}
+
+int getIdFromMac(const char* macAddress) {
+    int numMappings = sizeof(macMappings) / sizeof(MacToId);
+    for (int i = 0; i < numMappings; i++) {
+        if (strcmp(macMappings[i].mac, macAddress) == 0) {
+            return macMappings[i].id;
+        }
+    }
+    return -1; // Retorna -1 se não encontrar
+}
+
+void busInfoInit()
+{
+  for(int i = 0; i < MAX_HISTORY; i++)
+  {
+    busHistory[i].busId = 0;
+    busHistory[i].lineId = 0;
+    busHistory[i].time = 0;
+    busHistory[i].infoType = false;
+  }
+}
 
 // Initialize LoRa connection
 bool LoRa_init(void)
@@ -299,8 +331,9 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
       Serial.println(dispositivosEncontrados);
       if (dispositivosEncontrados == dispositivosAutorizados  
                     /*&& advertisedDevice.getRSSI() > nivelRSSI*/) {
-        dispositivoPresente = true;
+        dispositivoPresente = dispositivosEncontrados;
         Serial.println(dispositivoPresente);
+        Serial.println(advertisedDevice.getRSSI());
       } else {
 
       }
@@ -330,6 +363,8 @@ void setup()
 
   // tenta ate obter sucesso
   while(LoRa_init() == false);
+
+  busInfoInit();
 }
 
 /* variaveis utilizados para simular onibus chegando, realiza o trabalho de um contador assincrono que permite nao utilizar delay no loop principal */
@@ -388,12 +423,12 @@ void loop()
   {
     previousMillis = currentMillis;
     scanBLE();
-    if(dispositivoPresente && timestampConfigured)
+    if(dispositivoPresente != "0" && timestampConfigured)
     {
       Serial.println("Onibus chegou!");
+      if(indexOfBusInfo(busId) || busao na lista mas timestamp > 20min)
       SendBusArrivalData(32); // TODO: atribuir bus ID dependendo do MAC do beacon
-      dispositivoPresente = false;
-      delay(30000);
+      dispositivoPresente = "0";
     }
   }
 
