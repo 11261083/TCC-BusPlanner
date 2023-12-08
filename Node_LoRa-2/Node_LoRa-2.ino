@@ -46,7 +46,7 @@ String dispositivoPresente = "0";
 
 
 /* Definicaco do Unique ID do dispositivo */
-#define StopID              101
+#define StopID              102
 #define LineID_A            8012
 #define LineID_B            8022
 #define LineID_C            8032
@@ -85,7 +85,7 @@ typedef struct __attribute__((__packed__))
 struct TimestampPacket : public LoRaPacketHeader
 {
   uint32_t timestamp;
-} ;
+};
 
 struct BusArrivalDataPacket : public LoRaPacketHeader
 {
@@ -247,9 +247,8 @@ void PrintBusHistory()
   int temp = currentHistoryIndex - 1;
   if(temp == -1)
   {
-    temp = MAX_HISTORY - 1;
+    temp = 7;
   }
-  Serial.println("Bus History:");
   for(int i = 0; i < MAX_HISTORY; i++)
   {
     if(busHistory[temp].busId == 0)
@@ -257,7 +256,7 @@ void PrintBusHistory()
       temp--;
       if(temp == -1)
       {
-        temp = MAX_HISTORY -1 ;
+        temp = 7;
       }
 
       continue;
@@ -321,15 +320,15 @@ void PrintBusHistory()
   }
 }
 
-void processBusArrivalPacketData(BusPredictDataPacket predictData)
+void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
 {
-  if(predictData.stopId < StopID)     // OBS: as paradas de onibus numa linha terao seu StopId numa sequencia, logo os dados dos pontos da frente que nao seriam interessantes serao descartados
+  if(arrivalData.stopId < StopID)     // OBS: as paradas de onibus numa linha terao seu StopId numa sequencia, logo os dados dos pontos da frente que nao seriam interessantes serao descartados
   {
-    UpdatePredictionHistory(predictData, false);
+    UpdateBusHistory(arrivalData, false);
   }
 }
 
-void UpdateBusHistory(BusArrivalDataPacket arrivalData, bool isArrival)
+void UpdateBusHistory(BusArrivalDataPacket arrivalData, bool isArrival)  //TODO: pensar no caso de dados de onibus que AINDA ESTAO na memoria
 {
   BusInfo newInfo;
   newInfo.infoType = isArrival;
@@ -351,17 +350,6 @@ void UpdateBusHistory(BusArrivalDataPacket arrivalData, bool isArrival)
       busHistory[index] = newInfo;
     }
   }
-  PrintBusHistory();
-}
-
-void UpdatePredictionHistory(BusPredictDataPacket predictData, bool isArrival)  //TODO: pensar no caso de dados de onibus que AINDA ESTAO na memoria
-{
-  BusInfo newInfo;
-  newInfo.infoType = isArrival;
-  newInfo.busId = predictData.busId;
-  newInfo.stopId = predictData.stopId;
-  newInfo.lineId = predictData.lineId;
-  newInfo.time = predictData.predictTime;
 
   if(!isArrival)
   {
@@ -386,7 +374,7 @@ void SendBusArrivalData(uint32_t busId)
 
     BusArrivalDataPacket arrivalData;
     arrivalData.packetType = BUSARRIVALDATA_TO_GATEWAY;
-    arrivalData.lineId = LineID_A;
+    arrivalData.lineId = LineID_B;                               // TODO : logics to LineIds
     arrivalData.busId = busId;
     arrivalData.stopId = StopID;
     arrivalData.time = static_cast<uint32_t>(unix_timestamp);
@@ -404,7 +392,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advertisedDevice) {
       String dispositivosEncontrados = advertisedDevice.getAddress().toString().c_str();
       //Serial.println(dispositivosEncontrados);
-      if (dispositivosEncontrados == dispositivosAutorizados[0] ||   dispositivosEncontrados == dispositivosAutorizados[1]
+      if (dispositivosEncontrados == dispositivosAutorizados[0] || dispositivosEncontrados == dispositivosAutorizados[1]
                     && advertisedDevice.getRSSI() > nivelRSSI) {
         dispositivoPresente = dispositivosEncontrados;
         Serial.println(dispositivoPresente);
@@ -460,7 +448,7 @@ void loop()
     LoRa.readBytes((uint8_t*)&header, sizeof(LoRaPacketHeader));
     Serial.println(header.lineId);
 
-    if(header.lineId == LineID_A || header.lineId == LineID_B || header.packetType == TIMESTAMP_PACKET)
+    if(header.lineId == LineID_A || header.lineId == LineID_B)
     {
       // Com base no tipo, decidimos como ler o restante
       switch(header.packetType)
@@ -477,11 +465,11 @@ void loop()
           break;
         
         // colocar mais case statement conforme o necessario
-        case BUSPREDICTDATA_PACKET:
-          BusPredictDataPacket predictData;
-          memcpy(&predictData, &header, sizeof(LoRaPacketHeader));
-          LoRa.readBytes(((uint8_t*)&predictData) + sizeof(LoRaPacketHeader), sizeof(BusPredictDataPacket) - sizeof(LoRaPacketHeader));
-          processBusArrivalPacketData(predictData);
+        case BUSARRIVALDATA_PACKET:
+          BusArrivalDataPacket arrivalData;
+          memcpy(&arrivalData, &header, sizeof(LoRaPacketHeader));
+          LoRa.readBytes(((uint8_t*)&arrivalData) + sizeof(LoRaPacketHeader), sizeof(BusArrivalDataPacket) - sizeof(LoRaPacketHeader));
+          processBusArrivalPacketData(arrivalData);
           break;
           
 
@@ -504,13 +492,14 @@ void loop()
       Serial.print(busId);
 
       struct tm timeinfo;
-      if (!getLocalTime(&timeinfo)) 
-      {
-        Serial.println("Falha ao obter o tempo local");
-        return;
-      }
+      getLocalTime(&timeinfo);
+      // if (!getLocalTime(&timeinfo)) 
+      // {
+      //   Serial.println("Falha ao obter o tempo local");
+      //   return;
+      // }
       time_t unix_timestamp = mktime(&timeinfo);
-      uint32_t timestamp = static_cast<uint32_t>(unix_timestamp) - 12; //20min * 60s = 1200s
+      uint32_t timestamp = static_cast<uint32_t>(unix_timestamp) - 1200; //20min * 60s = 1200s
 
       int index = indexOfBusInfo(busId);
       if(index == -1 || busHistory[index].time < timestamp)

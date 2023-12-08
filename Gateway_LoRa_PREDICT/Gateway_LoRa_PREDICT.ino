@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include "time.h"
+#include <ctime>
 #include <PubSubClient.h>
 #include <DHT.h>
 #include <Wire.h>
@@ -9,15 +10,17 @@
 #include <Adafruit_SSD1306.h>
 #include <TimeLib.h>
 #include <ArduinoJson.h>
+#include <Arduino.h>
+#include <map>
 
 // Replace with your network credentials
-const char* ssid = "pedro";
-const char* password = "04022018";
+const char* ssid = "tcclucas";
+const char* password = "tcctcctcc";
 
 const char* mqttServer = "mqtt.tago.io";
 const int mqttPort = 1883;
-const char* mqttUser = "TccTagoIO"; //"Bus"; // Replace with your TagoIO token
-const char* mqttPassword = "e8e22b2e-80b7-4f1c-9b74-708a12d9f2ce"; //"0837b686-ab2b-4b83-b318-61220fb35b55";
+const char* mqttUser = "TccTagoIO"; // Replace with your TagoIO token
+const char* mqttPassword = "862b7c31-7caf-4420-8dfd-2cca33c6f587"; 
 
 /* GPIO do módulo WiFi LoRa 32(V2) que o pino de comunicação do sensor está ligado. */
 #define DHTPIN    13 /* (GPIO 13) */
@@ -69,7 +72,16 @@ enum PacketTypes {
     TIMESTAMP_PACKET = 1,
     BUSARRIVALDATA_PACKET = 2,
     BUSARRIVALDATA_TO_GATEWAY = 3,
+    BUSPREDICTDATA_PACKET = 4,
     // Adicione mais tipos conforme necessário
+};
+
+std::map<String, int> stopIdToIndex = {
+    {"101", 0},
+    {"102", 1},
+    {"8012", 0},
+    {"8022", 1},
+    // outros mapeamentos
 };
 
 typedef struct __attribute__((__packed__))
@@ -88,6 +100,13 @@ struct BusArrivalDataPacket : public LoRaPacketHeader
   uint32_t stopId;
   uint32_t busId;
   uint32_t time;
+};
+
+struct BusPredictDataPacket : public LoRaPacketHeader
+{
+  uint32_t stopId;
+  uint32_t busId;
+  uint32_t predictTime;
 };
 
 #define MAX_HISTORY  8   //
@@ -200,11 +219,115 @@ void envia_configTimestamp_LoRa(uint32_t timestamp)
   }
 }
 
+// ASSUMINDO
+//   STOPS: 1 e 2
+//   LINES: 12 e 22
+
+const int NUM_STOPS = 2;
+const int NUM_LINES = 2;
+const int NUM_RECORDS = 2;  // Para armazenar os últimos 2 ônibus
+
+struct BusStopData {
+  BusArrivalDataPacket records[NUM_RECORDS];  // precisa ser mesmo o item todo?
+};
+
+BusStopData stops[NUM_STOPS][NUM_LINES];
+
+// Função que atualiza os arrays de cada parada, mantendo sempre 2 itens em cada array
+void updateRecords(int stopId, int lineId, const BusArrivalDataPacket& newRecord) {
+
+  // POSSIVELMENTE ESSA FUNCAO QUEBRA SE OS ARRAYS ESTIVEREM VAZIOS, SO TESTANDO P SABER
+
+  // Desloca os registros existentes para abrir espaço para o novo registro
+  for (int i = NUM_RECORDS - 1; i > 0; --i) {
+    stops[stopId][lineId].records[i] = stops[stopId][lineId].records[i - 1];
+  }
+
+    // Insere o novo registro no início do array
+    // Sempre o último ônibus que passou estará na posição 0 do Array
+    stops[stopId][lineId].records[0] = newRecord;
+}
+
+// Definindo o intervalo máximo entre os ônibus para considerar como válido (em milissegundos)
+const unsigned long MAX_INTERVAL = 30 * 60 * 1000;  // 30 minutos
+
+// Função para calcular a média dos intervalos de tempo
+unsigned long calcularMediaIntervalo(int stopId, int lineId) {
+  unsigned long somaIntervalos = 0;
+  int numIntervalos = 0;
+
+  for (int i = 0; i < NUM_RECORDS - 1; ++i) {
+    // Verifica se os registros adjacentes são válidos
+    if (stops[stopId][lineId].records[i].time != 0 &&
+        stops[stopId][lineId].records[i + 1].time != 0) {
+      // Calcula o intervalo de tempo entre os registros
+      unsigned long intervalo = stops[stopId][lineId].records[i].time -
+                                stops[stopId][lineId].records[i + 1].time;
+
+      // Considera apenas intervalos válidos (menores que o máximo)
+      if (intervalo <= MAX_INTERVAL) {
+        somaIntervalos += intervalo;
+        numIntervalos++;
+      }
+    }
+  }
+
+  // Calcula a média dos intervalos (evita divisão por zero)
+  return (numIntervalos > 0) ? (somaIntervalos / numIntervalos) : 0;
+}
+
+// Função para gerar uma previsão de tempo com base nos últimos registros
+unsigned long getPredictTime(int stopId, int lineId) {
+  // Calcula a média dos intervalos de tempo
+  // unsigned long mediaIntervalo = calcularMediaIntervalo(stopId, lineId);
+
+  // // Se a média for válida, calcula a previsão de tempo para o próximo ônibus
+  // if (mediaIntervalo > 0) {
+  //   // Obtém o timestamp do registro mais recente
+  //   unsigned long ultimoRegistro = stops[stopId][lineId].records[0].time;
+
+  //   // Calcula a previsão somando a média ao timestamp do último registro
+  //   return ultimoRegistro + mediaIntervalo;
+  // } else {
+  //   // Se a média não for válida, retorna 0 indicando uma previsão inválida
+  //   return 0;
+  // }
+
+  if(stops[stopId][lineId].records[1].time != 0 &&
+      stops[stopId + 1][lineId].records[0].time != 0)
+      {
+        return stops[stopId + 1][lineId].records[0].time - stops[stopId][lineId].records[1].time;
+      }
+  else{
+    return 0;
+  }
+}
+
+
 void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
 {
   Serial.println("Bus ID: " + String(arrivalData.busId));
   Serial.println("Line ID: " + String(arrivalData.lineId));
   Serial.println("Stop ID: " + String(arrivalData.stopId));
+
+  int stopIndex = stopIdToIndex[String(arrivalData.stopId)];
+  Serial.println(stopIndex);
+  int lineIndex = stopIdToIndex[String(arrivalData.lineId)];
+
+  // ATUALIZANDO ARRAYS
+  updateRecords(stopIndex, lineIndex, arrivalData);
+
+  // OBTENDO PREVISAO
+  unsigned long predictTime = getPredictTime(arrivalData.stopId, arrivalData.lineId);
+
+  // ENVIANDO PACOTE PREDICT VIA MQTT P/ TAGOIO
+  BusPredictDataPacket busPredictDataPacket;
+  busPredictDataPacket.stopId = arrivalData.stopId + 1;
+  busPredictDataPacket.lineId = arrivalData.lineId;
+  busPredictDataPacket.busId = arrivalData.busId;
+  busPredictDataPacket.packetType = BUSPREDICTDATA_PACKET;
+  busPredictDataPacket.predictTime = arrivalData.time + predictTime;
+  // chamar func p/ enviar p/ tagoIO
 
   uint32_t unixTime = arrivalData.time;
   struct tm timeStruct;
@@ -229,23 +352,54 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   doc["date"] = date;
   doc["time"] =  hour;
   doc["timestamp"] = unixTime;
+  String topic = "info/" + String(arrivalData.stopId);
   String mqttOutput;
   serializeJson(doc, mqttOutput);
 
-  MQTT.publish("info/bus", mqttOutput.c_str());
+  unixTime = arrivalData.time + predictTime;
+  struct tm timeStruct1;
+  gmtime_r((const time_t *)&unixTime, &timeStruct1);
+  date = (String((timeStruct.tm_year) + 1900) + "-" + String(( timeStruct.tm_mon) + 1) + "-" + String(timeStruct.tm_mday));
+  hour = (String(currentHour) + ":" + String(timeStruct.tm_min) + ":" + String(timeStruct.tm_sec));
+  timeChar = ("Date: " + date + " - Time: " + hour).c_str();
 
-  BroadcastArrivalData(arrivalData);
+  StaticJsonDocument<capacity> doc2;
+  doc2["id"] = busPredictDataPacket.busId;
+  doc2["line"] = busPredictDataPacket.lineId;
+  doc2["date"] = date;
+  doc2["time"] =  hour;
+  doc2["timestamp"] = unixTime;
+  String topic2 = "predicts/" + String(busPredictDataPacket.stopId);
+  String mqttOutput2;
+  serializeJson(doc2, mqttOutput2);
+
+  MQTT.publish(topic.c_str(), mqttOutput.c_str());
+  MQTT.publish(topic2.c_str(), mqttOutput2.c_str());
+
+  BroadcastPredictData(busPredictDataPacket);
 }
 
-void BroadcastArrivalData(BusArrivalDataPacket arrivalData)
+void BroadcastArrivalData(BusPredictDataPacket busPredictDataPacket)
 {
-  arrivalData.packetType = BUSARRIVALDATA_PACKET;
+  busPredictDataPacket.packetType = BUSPREDICTDATA_PACKET;
 
   LoRa.beginPacket();
-  LoRa.write((unsigned char *)&arrivalData, sizeof(BusArrivalDataPacket));
-  Serial.println("Sending Bus data");
-  Serial.println(arrivalData.lineId);
-  Serial.println(arrivalData.stopId);
+  LoRa.write((unsigned char *)&busPredictDataPacket, sizeof(BusPredictDataPacket));
+  Serial.println("Sending Arrival Data");
+  Serial.println(busPredictDataPacket.lineId);
+  Serial.println(busPredictDataPacket.stopId);
+  LoRa.endPacket();
+}
+
+void BroadcastPredictData(BusPredictDataPacket predictData)
+{
+  predictData.packetType = BUSPREDICTDATA_PACKET;
+
+  LoRa.beginPacket();
+  LoRa.write((unsigned char *)&predictData, sizeof(BusPredictDataPacket));
+  Serial.println("Sending Predict Data");
+  Serial.println(predictData.lineId);
+  Serial.println(predictData.stopId);
   LoRa.endPacket();
 }
 
@@ -254,22 +408,18 @@ void setup() {
   initWiFi();
   MQTT_init();
   while(LoRa_init() == false);
-
   configTime(3600 * timezone, 0, "time.nist.gov", "0.pool.ntp.org", "1.pool.ntp.org");
 
-  struct tm timeInfo ;
-  Serial.println(timeInfo.tm_min);
-  timeInfo.tm_year = 0;
-  if (!getLocalTime(&timeInfo, 10000)) {
-    Serial.println("Failed to obtain time");
-    return;
-  }
-  time_t unix_timestamp = mktime(&timeInfo);
+  struct tm tmstructFirst ;
+  tmstructFirst.tm_year = 0;
+  getLocalTime(&tmstructFirst);
+
+  time_t unix_timestamp = mktime(&tmstructFirst);
   Serial.println(unix_timestamp);
-  if(unix_timestamp >= 1600000) 
+  if(unix_timestamp >= 1000000) 
   {
     uint32_t timestamp_to_send = static_cast<uint32_t>(unix_timestamp);
-    Serial.println("Enviando Timestamp");
+    Serial.println("entrou");
     // Envie o timestamp_to_send para o nó via LoRa
     envia_configTimestamp_LoRa(timestamp_to_send);
   } 
