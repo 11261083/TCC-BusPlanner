@@ -19,8 +19,8 @@ const char* password = "tcctcctcc";
 
 const char* mqttServer = "mqtt.tago.io";
 const int mqttPort = 1883;
-const char* mqttUser = "TccTagoIO"; // Replace with your TagoIO token
-const char* mqttPassword = "862b7c31-7caf-4420-8dfd-2cca33c6f587"; 
+const char* mqttUser = "Bus2"; // Replace with your TagoIO token
+const char* mqttPassword = "e76ce4ff-dc5f-4317-8852-0e8b4b43bbd9"; 
 
 /* GPIO do módulo WiFi LoRa 32(V2) que o pino de comunicação do sensor está ligado. */
 #define DHTPIN    13 /* (GPIO 13) */
@@ -298,6 +298,9 @@ unsigned long getPredictTime(int stopId, int lineId) {
       {
         return stops[stopId + 1][lineId].records[0].time - stops[stopId][lineId].records[1].time;
       }
+  else if(stopId == 0){
+    return 60; // 1 min
+  }
   else{
     return 0;
   }
@@ -344,17 +347,20 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   String date = (String((timeStruct.tm_year) + 1900) + "-" + String(( timeStruct.tm_mon) + 1) + "-" + String(timeStruct.tm_mday));
   String hour = (String(currentHour) + ":" + String(timeStruct.tm_min) + ":" + String(timeStruct.tm_sec));
   const char* timeChar = ("Date: " + date + " - Time: " + hour).c_str();
+  Serial.println(hour);
 
-  const size_t  capacity = JSON_OBJECT_SIZE(5);
+  const size_t  capacity = JSON_OBJECT_SIZE(10);
   StaticJsonDocument<capacity> doc;
   doc["id"] = arrivalData.busId;
   doc["line"] = arrivalData.lineId;
   doc["date"] = date;
-  doc["time"] =  hour;
-  doc["timestamp"] = unixTime;
+  doc["hour"] =  hour;
+  doc["time"] = unixTime;
   String topic = "info/" + String(arrivalData.stopId);
   String mqttOutput;
   serializeJson(doc, mqttOutput);
+
+  MQTT.publish(topic.c_str(), mqttOutput.c_str());
 
   unixTime = arrivalData.time + predictTime;
   struct tm timeStruct1;
@@ -367,13 +373,12 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   doc2["id"] = busPredictDataPacket.busId;
   doc2["line"] = busPredictDataPacket.lineId;
   doc2["date"] = date;
-  doc2["time"] =  hour;
-  doc2["timestamp"] = unixTime;
+  doc2["hour"] =  hour;
+  doc2["time"] = unixTime;
   String topic2 = "predicts/" + String(busPredictDataPacket.stopId);
   String mqttOutput2;
   serializeJson(doc2, mqttOutput2);
 
-  MQTT.publish(topic.c_str(), mqttOutput.c_str());
   MQTT.publish(topic2.c_str(), mqttOutput2.c_str());
 
   BroadcastPredictData(busPredictDataPacket);

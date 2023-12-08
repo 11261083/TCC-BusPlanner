@@ -510,7 +510,7 @@ void loop()
         return;
       }
       time_t unix_timestamp = mktime(&timeinfo);
-      uint32_t timestamp = static_cast<uint32_t>(unix_timestamp) - 12; //20min * 60s = 1200s
+      uint32_t timestamp = static_cast<uint32_t>(unix_timestamp) - 30; //20min * 60s = 1200s
 
       int index = indexOfBusInfo(busId);
       if(index == -1 || busHistory[index].time < timestamp)
