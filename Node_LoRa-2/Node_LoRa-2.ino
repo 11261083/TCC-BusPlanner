@@ -76,6 +76,12 @@ MacToId macMappings[] = {
     // Adicione mais mapeamentos conforme necessário
 };
 
+std::map<int, int> busIdToLineId = {
+    {60, 8012},
+    {80, 8022},
+    // outros mapeamentos
+};
+
 typedef struct __attribute__((__packed__))
 {
   uint32_t lineId;
@@ -386,7 +392,7 @@ void SendBusArrivalData(uint32_t busId)
 
     BusArrivalDataPacket arrivalData;
     arrivalData.packetType = BUSARRIVALDATA_TO_GATEWAY;
-    arrivalData.lineId = LineID_A;
+    arrivalData.lineId = busIdToLineId[busId];
     arrivalData.busId = busId;
     arrivalData.stopId = StopID;
     arrivalData.time = static_cast<uint32_t>(unix_timestamp);
@@ -510,7 +516,7 @@ void loop()
         return;
       }
       time_t unix_timestamp = mktime(&timeinfo);
-      uint32_t timestamp = static_cast<uint32_t>(unix_timestamp) - 12; //20min * 60s = 1200s
+      uint32_t timestamp = static_cast<uint32_t>(unix_timestamp) - 30; //20min * 60s = 1200s
 
       int index = indexOfBusInfo(busId);
       if(index == -1 || busHistory[index].time < timestamp)

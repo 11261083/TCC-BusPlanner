@@ -349,13 +349,14 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   const char* timeChar = ("Date: " + date + " - Time: " + hour).c_str();
   Serial.println(hour);
 
-  const size_t  capacity = JSON_OBJECT_SIZE(10);
+  const size_t  capacity = JSON_OBJECT_SIZE(15);
   StaticJsonDocument<capacity> doc;
-  doc["id"] = arrivalData.busId;
-  doc["line"] = arrivalData.lineId;
-  doc["date"] = date;
-  doc["hour"] =  hour;
-  doc["time"] = unixTime;
+  doc["id_"+String(arrivalData.stopId)] = arrivalData.busId;
+  doc["line_"+String(arrivalData.stopId)] = arrivalData.lineId;
+  doc["date_"+String(arrivalData.stopId)] = date;
+  doc["hour_"+String(arrivalData.stopId)] =  hour;
+  doc["time_"+String(arrivalData.stopId)] = unixTime;
+  doc["time_"+String(arrivalData.stopId)+ "_" + String(arrivalData.lineId)] = unixTime; //atencao! variavel para display
   String topic = "info/" + String(arrivalData.stopId);
   String mqttOutput;
   serializeJson(doc, mqttOutput);
@@ -370,11 +371,12 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   timeChar = ("Date: " + date + " - Time: " + hour).c_str();
 
   StaticJsonDocument<capacity> doc2;
-  doc2["id"] = busPredictDataPacket.busId;
-  doc2["line"] = busPredictDataPacket.lineId;
-  doc2["date"] = date;
-  doc2["hour"] =  hour;
-  doc2["time"] = unixTime;
+  doc2["id_"+String(busPredictDataPacket.stopId)] = busPredictDataPacket.busId;
+  doc2["line_"+String(busPredictDataPacket.stopId)] = busPredictDataPacket.lineId;
+  doc2["date_"+String(busPredictDataPacket.stopId)] = date;
+  doc2["hour_"+String(busPredictDataPacket.stopId)] =  hour;
+  doc2["time_"+String(busPredictDataPacket.stopId)] = unixTime;
+  doc2["time_"+String(busPredictDataPacket.stopId) + "_" + String(busPredictDataPacket.lineId)] = unixTime; //atencao! variavel para display
   String topic2 = "predicts/" + String(busPredictDataPacket.stopId);
   String mqttOutput2;
   serializeJson(doc2, mqttOutput2);
