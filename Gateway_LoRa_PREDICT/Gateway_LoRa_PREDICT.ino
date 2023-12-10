@@ -228,7 +228,7 @@ const int NUM_LINES = 2;
 const int NUM_RECORDS = 2;  // Para armazenar os últimos 2 ônibus
 
 struct BusStopData {
-  BusArrivalDataPacket records[NUM_RECORDS];  // precisa ser mesmo o item todo?
+  BusArrivalDataPacket records[NUM_RECORDS]; 
 };
 
 BusStopData stops[NUM_STOPS][NUM_LINES];
