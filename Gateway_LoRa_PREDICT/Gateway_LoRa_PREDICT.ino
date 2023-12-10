@@ -255,8 +255,6 @@ void initRecords()
 // Função que atualiza os arrays de cada parada, mantendo sempre 2 itens em cada array
 void updateRecords(int stopId, int lineId, const BusArrivalDataPacket& newRecord) {
 
-  // POSSIVELMENTE ESSA FUNCAO QUEBRA SE OS ARRAYS ESTIVEREM VAZIOS, SO TESTANDO P SABER
-
   // Desloca os registros existentes para abrir espaço para o novo registro
   for (int i = NUM_RECORDS - 1; i > 0; --i) {
     stops[stopId][lineId].records[i] = stops[stopId][lineId].records[i - 1];
