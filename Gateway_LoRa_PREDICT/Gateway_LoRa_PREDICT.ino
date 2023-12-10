@@ -274,9 +274,9 @@ uint32_t getPredictTime(int stopId, int lineId) {
       {
         return stops[stopId + 1][lineId].records[0].time - stops[stopId][lineId].records[1].time;
       }
-  // else if(stopId == 0){
-  //   return 60; // 1 min
-  // }
+  else if(stopId == 0){
+    return 1200; // 60 s*20 m = 1200s
+  }
   else{
     return 0;
   }
