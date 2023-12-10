@@ -266,59 +266,12 @@ void updateRecords(int stopId, int lineId, const BusArrivalDataPacket& newRecord
     stops[stopId][lineId].records[0] = newRecord;
 }
 
-// Definindo o intervalo máximo entre os ônibus para considerar como válido (em milissegundos)
-const unsigned long MAX_INTERVAL = 30 * 60 * 1000;  // 30 minutos
-
-// Função para calcular a média dos intervalos de tempo
-unsigned long calcularMediaIntervalo(int stopId, int lineId) {
-  unsigned long somaIntervalos = 0;
-  int numIntervalos = 0;
-
-  for (int i = 0; i < NUM_RECORDS - 1; ++i) {
-    // Verifica se os registros adjacentes são válidos
-    if (stops[stopId][lineId].records[i].time != 0 &&
-        stops[stopId][lineId].records[i + 1].time != 0) {
-      // Calcula o intervalo de tempo entre os registros
-      unsigned long intervalo = stops[stopId][lineId].records[i].time -
-                                stops[stopId][lineId].records[i + 1].time;
-
-      // Considera apenas intervalos válidos (menores que o máximo)
-      if (intervalo <= MAX_INTERVAL) {
-        somaIntervalos += intervalo;
-        numIntervalos++;
-      }
-    }
-  }
-
-  // Calcula a média dos intervalos (evita divisão por zero)
-  return (numIntervalos > 0) ? (somaIntervalos / numIntervalos) : 0;
-}
-
 // Função para gerar uma previsão de tempo com base nos últimos registros
 uint32_t getPredictTime(int stopId, int lineId) {
-  // Calcula a média dos intervalos de tempo
-  // unsigned long mediaIntervalo = calcularMediaIntervalo(stopId, lineId);
-
-  // // Se a média for válida, calcula a previsão de tempo para o próximo ônibus
-  // if (mediaIntervalo > 0) {
-  //   // Obtém o timestamp do registro mais recente
-  //   unsigned long ultimoRegistro = stops[stopId][lineId].records[0].time;
-
-  //   // Calcula a previsão somando a média ao timestamp do último registro
-  //   return ultimoRegistro + mediaIntervalo;
-  // } else {
-  //   // Se a média não for válida, retorna 0 indicando uma previsão inválida
-  //   return 0;
-  // }
-  Serial.println("no get predict");
-  Serial.println(stops[stopId][lineId].records[0].time);
-  Serial.println(stops[stopId][lineId].records[1].time);
-  Serial.println(stops[stopId+1][lineId].records[0].time);
-
+    
   if(stops[stopId][lineId].records[1].time != 0 &&
       stops[stopId + 1][lineId].records[0].time != 0)
       {
-        Serial.println("entrou no lugar errado");
         return stops[stopId + 1][lineId].records[0].time - stops[stopId][lineId].records[1].time;
       }
   // else if(stopId == 0){
