@@ -14,8 +14,8 @@
 #include <map>
 
 // Replace with your network credentials
-const char* ssid = "tcclucas";
-const char* password = "tcctcctcc";
+const char* ssid = "pedro";
+const char* password = "04022018";
 
 const char* mqttServer = "mqtt.tago.io";
 const int mqttPort = 1883;
@@ -233,6 +233,25 @@ struct BusStopData {
 
 BusStopData stops[NUM_STOPS][NUM_LINES];
 
+void initRecords()
+{
+  for(int i = 0; i < NUM_STOPS; i++)
+  {
+    for(int j = 0; j < NUM_LINES; j++)
+    {
+      for(int k = 0; k < NUM_RECORDS; k++)
+      {
+        stops[i][j].records[k].lineId = 0;
+        stops[i][j].records[k].packetType = 0;
+        stops[i][j].records[k].busId = 0;
+        stops[i][j].records[k].stopId = 0;
+        stops[i][j].records[k].time = 0;
+      }
+    }
+  }
+  Serial.println(stops[0][0].records[0].time);
+}
+
 // Função que atualiza os arrays de cada parada, mantendo sempre 2 itens em cada array
 void updateRecords(int stopId, int lineId, const BusArrivalDataPacket& newRecord) {
 
@@ -245,6 +264,7 @@ void updateRecords(int stopId, int lineId, const BusArrivalDataPacket& newRecord
 
     // Insere o novo registro no início do array
     // Sempre o último ônibus que passou estará na posição 0 do Array
+    Serial.println(newRecord.time);
     stops[stopId][lineId].records[0] = newRecord;
 }
 
@@ -277,7 +297,7 @@ unsigned long calcularMediaIntervalo(int stopId, int lineId) {
 }
 
 // Função para gerar uma previsão de tempo com base nos últimos registros
-unsigned long getPredictTime(int stopId, int lineId) {
+uint32_t getPredictTime(int stopId, int lineId) {
   // Calcula a média dos intervalos de tempo
   // unsigned long mediaIntervalo = calcularMediaIntervalo(stopId, lineId);
 
@@ -292,15 +312,20 @@ unsigned long getPredictTime(int stopId, int lineId) {
   //   // Se a média não for válida, retorna 0 indicando uma previsão inválida
   //   return 0;
   // }
+  Serial.println("no get predict");
+  Serial.println(stops[stopId][lineId].records[0].time);
+  Serial.println(stops[stopId][lineId].records[1].time);
+  Serial.println(stops[stopId+1][lineId].records[0].time);
 
   if(stops[stopId][lineId].records[1].time != 0 &&
       stops[stopId + 1][lineId].records[0].time != 0)
       {
+        Serial.println("entrou no lugar errado");
         return stops[stopId + 1][lineId].records[0].time - stops[stopId][lineId].records[1].time;
       }
-  else if(stopId == 0){
-    return 60; // 1 min
-  }
+  // else if(stopId == 0){
+  //   return 60; // 1 min
+  // }
   else{
     return 0;
   }
@@ -321,7 +346,8 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   updateRecords(stopIndex, lineIndex, arrivalData);
 
   // OBTENDO PREVISAO
-  unsigned long predictTime = getPredictTime(arrivalData.stopId, arrivalData.lineId);
+  uint32_t predictTime = getPredictTime(stopIndex, lineIndex);
+  Serial.println(predictTime);
 
   // ENVIANDO PACOTE PREDICT VIA MQTT P/ TAGOIO
   BusPredictDataPacket busPredictDataPacket;
@@ -347,16 +373,15 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   String date = (String((timeStruct.tm_year) + 1900) + "-" + String(( timeStruct.tm_mon) + 1) + "-" + String(timeStruct.tm_mday));
   String hour = (String(currentHour) + ":" + String(timeStruct.tm_min) + ":" + String(timeStruct.tm_sec));
   const char* timeChar = ("Date: " + date + " - Time: " + hour).c_str();
-  Serial.println(hour);
 
   const size_t  capacity = JSON_OBJECT_SIZE(15);
   StaticJsonDocument<capacity> doc;
-  doc["id_"+String(arrivalData.stopId)] = arrivalData.busId;
-  doc["line_"+String(arrivalData.stopId)] = arrivalData.lineId;
-  doc["date_"+String(arrivalData.stopId)] = date;
-  doc["hour_"+String(arrivalData.stopId)] =  hour;
-  doc["time_"+String(arrivalData.stopId)] = unixTime;
-  doc["time_"+String(arrivalData.stopId)+ "_" + String(arrivalData.lineId)] = unixTime; //atencao! variavel para display
+  doc["R_id_"+String(arrivalData.stopId)] = arrivalData.busId;
+  doc["R_line_"+String(arrivalData.stopId)] = arrivalData.lineId;
+  doc["R_date_"+String(arrivalData.stopId)] = date;
+  doc["R_hour_"+String(arrivalData.stopId)] =  hour;
+  doc["R_time_"+String(arrivalData.stopId)] = unixTime;
+  doc["R_time_"+String(arrivalData.stopId)+ "_" + String(arrivalData.lineId)] = unixTime; //atencao! variavel para display
   String topic = "info/" + String(arrivalData.stopId);
   String mqttOutput;
   serializeJson(doc, mqttOutput);
@@ -366,17 +391,25 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   unixTime = arrivalData.time + predictTime;
   struct tm timeStruct1;
   gmtime_r((const time_t *)&unixTime, &timeStruct1);
-  date = (String((timeStruct.tm_year) + 1900) + "-" + String(( timeStruct.tm_mon) + 1) + "-" + String(timeStruct.tm_mday));
-  hour = (String(currentHour) + ":" + String(timeStruct.tm_min) + ":" + String(timeStruct.tm_sec));
+
+  currentHour = timeStruct1.tm_hour - 3;
+  if(currentHour < 0)
+  {
+    currentHour = currentHour + 24;
+  }
+
+  date = (String((timeStruct1.tm_year) + 1900) + "-" + String(( timeStruct1.tm_mon) + 1) + "-" + String(timeStruct1.tm_mday));
+  hour = (String(currentHour) + ":" + String(timeStruct1.tm_min) + ":" + String(timeStruct1.tm_sec));
   timeChar = ("Date: " + date + " - Time: " + hour).c_str();
+  Serial.println(hour);
 
   StaticJsonDocument<capacity> doc2;
-  doc2["id_"+String(busPredictDataPacket.stopId)] = busPredictDataPacket.busId;
-  doc2["line_"+String(busPredictDataPacket.stopId)] = busPredictDataPacket.lineId;
-  doc2["date_"+String(busPredictDataPacket.stopId)] = date;
-  doc2["hour_"+String(busPredictDataPacket.stopId)] =  hour;
-  doc2["time_"+String(busPredictDataPacket.stopId)] = unixTime;
-  doc2["time_"+String(busPredictDataPacket.stopId) + "_" + String(busPredictDataPacket.lineId)] = unixTime; //atencao! variavel para display
+  doc2["P_id_"+String(busPredictDataPacket.stopId)] = busPredictDataPacket.busId;
+  doc2["P_line_"+String(busPredictDataPacket.stopId)] = busPredictDataPacket.lineId;
+  doc2["P_date_"+String(busPredictDataPacket.stopId)] = date;
+  doc2["P_hour_"+String(busPredictDataPacket.stopId)] =  hour;
+  doc2["P_time_"+String(busPredictDataPacket.stopId)] = unixTime;
+  doc2["P_time_"+String(busPredictDataPacket.stopId) + "_" + String(busPredictDataPacket.lineId)] = unixTime; //atencao! variavel para display
   String topic2 = "predicts/" + String(busPredictDataPacket.stopId);
   String mqttOutput2;
   serializeJson(doc2, mqttOutput2);
@@ -435,6 +468,7 @@ void setup() {
     // Trate erro: timestamp é anterior a 1970, o que não é esperado em seu caso
     Serial.println("Erro no timestamp");
   }
+  initRecords();
 }
 
 /* variaveis utilizados para simular onibus chegando, realiza o trabalho de um contador assincrono que permite nao utilizar delay no loop principal */

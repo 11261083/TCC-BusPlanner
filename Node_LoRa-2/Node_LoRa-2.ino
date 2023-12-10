@@ -82,7 +82,7 @@ std::map<int, int> busIdToLineId = {
     // outros mapeamentos
 };
 
-typedef struct __attribute__((__packed__))
+typedef struct _attribute((packed_))
 {
   uint32_t lineId;
   uint8_t packetType;
@@ -314,10 +314,15 @@ void PrintBusHistory()
     uint32_t unixTime = busPredictions[temp].time;
     struct tm timeStruct;
     gmtime_r((const time_t *)&unixTime, &timeStruct);
+    Serial.println("Unix Time: " + String(unixTime));
     
-    int currentHour = timeStruct.tm_hour;
+    int currentHour = timeStruct.tm_hour - 3;
+    if(currentHour < 0)
+    {
+      currentHour = currentHour + 24;
+    }
 
-    Serial.println("Prediction Time: " + String(currentHour - 3) + " : " + String(timeStruct.tm_min + 10) + " : " + String(timeStruct.tm_sec));
+    Serial.println("Prediction Time: " + String(currentHour) + " : " + String(timeStruct.tm_min) + " : " + String(timeStruct.tm_sec));
 
     temp--;
     if(temp == -1)
@@ -329,7 +334,7 @@ void PrintBusHistory()
 
 void processBusArrivalPacketData(BusPredictDataPacket predictData)
 {
-  if(predictData.stopId < StopID)     // OBS: as paradas de onibus numa linha terao seu StopId numa sequencia, logo os dados dos pontos da frente que nao seriam interessantes serao descartados
+  if(predictData.stopId == StopID)     // OBS: as paradas de onibus numa linha terao seu StopId numa sequencia, logo os dados dos pontos da frente que nao seriam interessantes serao descartados
   {
     UpdatePredictionHistory(predictData, false);
   }
@@ -410,7 +415,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advertisedDevice) {
       String dispositivosEncontrados = advertisedDevice.getAddress().toString().c_str();
       //Serial.println(dispositivosEncontrados);
-      if (dispositivosEncontrados == dispositivosAutorizados[0] ||   dispositivosEncontrados == dispositivosAutorizados[1]
+      if ((dispositivosEncontrados == dispositivosAutorizados[0] ||   dispositivosEncontrados == dispositivosAutorizados[1])
                     && advertisedDevice.getRSSI() > nivelRSSI) {
         dispositivoPresente = dispositivosEncontrados;
         Serial.println(dispositivoPresente);

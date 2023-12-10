@@ -410,7 +410,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advertisedDevice) {
       String dispositivosEncontrados = advertisedDevice.getAddress().toString().c_str();
       //Serial.println(dispositivosEncontrados);
-      if (dispositivosEncontrados == dispositivosAutorizados[0] ||   dispositivosEncontrados == dispositivosAutorizados[1]
+      if ((dispositivosEncontrados == dispositivosAutorizados[0] || dispositivosEncontrados == dispositivosAutorizados[1])
                     && advertisedDevice.getRSSI() > nivelRSSI) {
         dispositivoPresente = dispositivosEncontrados;
         Serial.println(dispositivoPresente);
