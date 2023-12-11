@@ -128,12 +128,22 @@ void initWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi ..");
+
+  display.clearDisplay();
+  display.setCursor(0, OLED_LINE1);
+  display.println("Connecting to WiFi...");
+  display.display();
+
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print('\n');
     Serial.print(WiFi.status());
     delay(1000);
   }
   Serial.println(WiFi.localIP());
+
+  display.setCursor(0, OLED_LINE2);
+  display.println("Connected!");
+  display.display();
 }
 
 // Initialize Display
@@ -207,14 +217,23 @@ void envia_configTimestamp_LoRa(uint32_t timestamp)
   LoRa.beginPacket();
   LoRa.write((unsigned char *)&timestampPacket, sizeof(TimestampPacket));
   Serial.println("Sending Timestamp Configuration");
-  Serial.println(sizeof(TimestampPacket));
-  Serial.println(timestampPacket.lineId);
-  Serial.println(timestampPacket.timestamp);
+
+  display.clearDisplay();   
+  display.setCursor(0, OLED_LINE1);
+  display.print("Enviando Timestamp...");
+  display.display();
+
   LoRa.endPacket();
-  if (LoRa.endPacket() == 1) {
-  Serial.println("Pacote enviado com sucesso!");
+  if (LoRa.endPacket() == 1)
+  {
+    Serial.println("Pacote enviado com sucesso!");
+    display.clearDisplay();   
+    display.setCursor(0, OLED_LINE1);
+    display.print("Enviado com sucesso!");
+    display.display();
   } 
-  else {
+  else 
+  {
     Serial.println("Falha ao enviar o pacote.");
   }
 }
@@ -289,6 +308,17 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   Serial.println("Line ID: " + String(arrivalData.lineId));
   Serial.println("Stop ID: " + String(arrivalData.stopId));
 
+  display.clearDisplay();   
+  display.setCursor(0, OLED_LINE1);
+  display.print("Ônibus chegou!");
+  display.setCursor(0, OLED_LINE2);
+  display.print("Bus ID: " + String(arrivalData.busId));
+  display.setCursor(0, OLED_LINE3);
+  display.print("Line ID: " + String(arrivalData.lineId));
+  display.setCursor(0, OLED_LINE4);
+  display.print("Stop ID: " + String(arrivalData.stopId));
+  display.display();
+
   int stopIndex = stopIdToIndex[String(arrivalData.stopId)];
   Serial.println(stopIndex);
   int lineIndex = stopIdToIndex[String(arrivalData.lineId)];
@@ -332,7 +362,7 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   doc["R_date_"+String(arrivalData.stopId)] = date;
   doc["R_hour_"+String(arrivalData.stopId)] =  hour;
   doc["R_time_"+String(arrivalData.stopId)] = unixTime;
-  doc["R_time_"+String(arrivalData.stopId)+ "_" + String(arrivalData.lineId)] = unixTime; //atencao! variavel para display
+  doc["R_time_"+String(arrivalData.stopId)+ "_" + String(arrivalData.lineId)] = hour; //atencao! variavel para display
   String topic = "info/" + String(arrivalData.stopId);
   String mqttOutput;
   serializeJson(doc, mqttOutput);
@@ -360,7 +390,7 @@ void processBusArrivalPacketData(BusArrivalDataPacket arrivalData)
   doc2["P_date_"+String(busPredictDataPacket.stopId)] = date;
   doc2["P_hour_"+String(busPredictDataPacket.stopId)] =  hour;
   doc2["P_time_"+String(busPredictDataPacket.stopId)] = unixTime;
-  doc2["P_time_"+String(busPredictDataPacket.stopId) + "_" + String(busPredictDataPacket.lineId)] = unixTime; //atencao! variavel para display
+  doc2["P_time_"+String(busPredictDataPacket.stopId) + "_" + String(busPredictDataPacket.lineId)] = hour; //atencao! variavel para display
   String topic2 = "predicts/" + String(busPredictDataPacket.stopId);
   String mqttOutput2;
   serializeJson(doc2, mqttOutput2);
@@ -396,6 +426,13 @@ void BroadcastPredictData(BusPredictDataPacket predictData)
 
 void setup() {
   Serial.begin(115200);
+  Wire.begin(4, 15);
+  display_init();
+  display.clearDisplay();    
+  display.setCursor(0, OLED_LINE1);
+  display.print("Aguarde...");
+  display.display();
+
   initWiFi();
   MQTT_init();
   while(LoRa_init() == false);
@@ -406,11 +443,16 @@ void setup() {
   getLocalTime(&tmstructFirst);
 
   time_t unix_timestamp = mktime(&tmstructFirst);
-  Serial.println(unix_timestamp);
+  Serial.println("Procurando Timestamp");
+
+  display.clearDisplay();   
+  display.setCursor(0, OLED_LINE1);
+  display.print("Procurando Timestamp...");
+  display.display();
+
   if(unix_timestamp >= 1000000) 
   {
     uint32_t timestamp_to_send = static_cast<uint32_t>(unix_timestamp);
-    Serial.println("entrou");
     // Envie o timestamp_to_send para o nó via LoRa
     envia_configTimestamp_LoRa(timestamp_to_send);
   } 
@@ -418,6 +460,11 @@ void setup() {
   {
     // Trate erro: timestamp é anterior a 1970, o que não é esperado em seu caso
     Serial.println("Erro no timestamp");
+
+    display.clearDisplay();   
+    display.setCursor(0, OLED_LINE1);
+    display.print("Erro no timestamp!!!");
+    display.display();
   }
   initRecords();
 }
